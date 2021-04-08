@@ -1,33 +1,51 @@
 #!/usr/bin/env bash
-#
-# AWS status line for tmux
-#
 
-AWS_TMUX_BINARY="${AWS_TMUX_BINARY:-aws}"
-STATUS_DEFAULT_COLOR="${STATUS_DEFAULT_COLOR:-black}"
-AWS_REGION="unknown"
-AWS_CLI_VERSION="unknown"
+CURRENT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-aws_get_region() {
-  AWS_REGION="$(${AWS_TMUX_BINARY} configure get region 2>/dev/null)"
+source "$CURRENT_DIR/scripts/helpers.sh"
+export TMUX_CFN="foobar"
+
+aws_interpolations=(
+	"\#{aws_region}"
+	"\#{aws_version}"
+	"\#{aws_cfn_status}"
+)
+
+aws_commands=(
+  "#($CURRENT_DIR/scripts/region.sh)"
+  "#($CURRENT_DIR/scripts/version.sh)"
+  "#($CURRENT_DIR/scripts/cfn_status.sh)"
+)
+
+do_interpolation() {
+	local interpolated="$1"
+
+	for ((i=0; i<${#aws_commands[@]}; i++)); do
+		interpolated=${interpolated/${aws_interpolations[$i]}/${aws_commands[$i]}}
+	done
+
+	echo "$interpolated"
 }
 
-aws_get_profile() {
-  AWS_CLI_VERSION="$(${AWS_TMUX_BINARY} --version 2>/dev/null | cut -f1 -d ' ' | cut -f2 -d '/')"
+set_tmux_options() {
+	local option="$1"
+	local value="$2"
+	tmux set-option -gp "$option" "$value"
 }
 
-aws_tmux() {
-  local AWS_STATUS
-
-  # query region and add to status:
-  aws_get_region
-  AWS_STATUS+="#[fg=$STATUS_DEFAULT_COLOR]region: #[fg=colour215]${AWS_REGION} "
-
-  # query CLI version and add to status:
-  aws_get_profile
-  AWS_STATUS+="#[fg=black]| #[fg=$STATUS_DEFAULT_COLOR]CLI version: #[fg=colour215]${AWS_CLI_VERSION} "
-
-  echo "${AWS_STATUS}"
+update_tmux_option() {
+	local option=$1
+	local option_value=$(get_tmux_option "$option")
+	local new_option_value=$(do_interpolation "$option_value")
+	set_tmux_option "$option" "$new_option_value"
 }
 
-aws_tmux "$@"
+main() {
+	update_tmux_option "status-right"
+	update_tmux_option "status-left"
+}
+
+key="$(get_tmux_option '@aws-cfn-list' 'u')"
+tmux bind-key $key run -b "$CURRENT_DIR/scripts/cfn_list.sh";
+
+main
